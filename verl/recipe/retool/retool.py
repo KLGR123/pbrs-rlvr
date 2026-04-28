@@ -68,14 +68,15 @@ class CustomRLHFDataset(RLHFDataset):
         dataframes = []
         for parquet_file in self.data_files:
             # read parquet files and cache
-            dataframe = datasets.load_dataset(parquet_file)["train"]
+            # dataframe = datasets.load_dataset(parquet_file)["train"]
+            dataframe = datasets.load_dataset("parquet", data_files=parquet_file)["train"]
             data_source = "/".join(parquet_file.split("/")[-2:])
             if data_source in ["Maxwell-Jia/AIME_2024", "yentinglin/aime_2025"]:
                 dataframe = dataframe.map(
                     self.map_fn, fn_kwargs={"data_source": data_source}, remove_columns=dataframe.column_names
                 )
             else:
-                dataframe = dataframe.map(self.map_fn2, num_proc=16)
+                dataframe = dataframe.map(self.map_fn2, num_proc=1)
             dataframes.append(dataframe)
         self.dataframe: datasets.Dataset = datasets.concatenate_datasets(dataframes)
 
@@ -97,9 +98,40 @@ class CustomRLHFDataset(RLHFDataset):
         }
         return data
 
+    # def map_fn2(self, row: dict):
+    #     content = row["prompt"][0]["content"]
+    #     row["prompt"][0]["content"] = content + answer_format
+    #     row["agent_name"] = "tool_agent"
+    #     return row
+
+    # def map_fn2(self, row: dict):
+    #     source_prompt = row["source_prompt"]
+        
+    #     if hasattr(source_prompt, 'tolist'):
+    #         source_prompt = source_prompt.tolist()
+        
+    #     source_prompt[0]["content"] = source_prompt[0]["content"] + answer_format
+    #     row["prompt"] = source_prompt
+    #     row["agent_name"] = "tool_agent"
+    #     return row
+
     def map_fn2(self, row: dict):
-        content = row["prompt"][0]["content"]
-        row["prompt"][0]["content"] = content + answer_format
+        # DAPO 数据有 source_prompt 字段（numpy array，chat 格式）
+        # AIME 预处理后的数据 prompt 已经是 list of dicts，没有 source_prompt
+        if "source_prompt" in row:
+            source_prompt = row["source_prompt"]
+            if hasattr(source_prompt, 'tolist'):
+                source_prompt = source_prompt.tolist()
+        else:
+            # prompt 已经是 list of dicts，直接用
+            source_prompt = row["prompt"]
+            if isinstance(source_prompt, str):
+                import json
+                source_prompt = json.loads(source_prompt)
+
+        source_prompt[0]["content"] = source_prompt[0]["content"] + answer_format
+
+        row["prompt"] = source_prompt
         row["agent_name"] = "tool_agent"
         return row
 
